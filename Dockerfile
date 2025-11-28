@@ -52,7 +52,7 @@ echo "Web Terminal Ready!"\n\
 echo "================================="\n\
 echo "Access your terminal in browser"\n\
 echo "================================="\n\
-ttyd -p $PORT -W bash' > /start.sh && \
+ttyd -p $PORT -i 0.0.0.0 --writable --credential terminal:terminal bash' > /start.sh && \
     chmod +x /start.sh
 
 # Switch to terminal user
