@@ -18,19 +18,26 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     sudo \
+    cmake \
+    g++ \
+    pkg-config \
+    libwebsockets-dev \
+    libjson-c-dev \
+    libssl-dev \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Install ttyd (lightweight web terminal)
+RUN wget https://github.com/tsl0922/ttyd/releases/download/1.7.4/ttyd.x86_64 -O /usr/local/bin/ttyd && \
+    chmod +x /usr/local/bin/ttyd
 
 # Create a non-root user with sudo access
 RUN useradd -m -s /bin/bash terminal && \
     echo "terminal:terminal" | chpasswd && \
     usermod -aG sudo terminal && \
     echo "terminal ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
-# Install wetty (web-based terminal)
-RUN npm install -g wetty
 
 # Set working directory
 WORKDIR /home/terminal
@@ -43,13 +50,12 @@ RUN echo '#!/bin/bash\n\
 echo "================================="\n\
 echo "Web Terminal Ready!"\n\
 echo "================================="\n\
-echo "Username: terminal"\n\
-echo "Password: terminal"\n\
+echo "Access your terminal in browser"\n\
 echo "================================="\n\
-wetty --host 0.0.0.0 --port $PORT --base / --title "Render Terminal"' > /start.sh && \
+ttyd -p $PORT -W bash' > /start.sh && \
     chmod +x /start.sh
 
-# Switch to non-root user
+# Switch to terminal user
 USER terminal
 
 # Start the web terminal
