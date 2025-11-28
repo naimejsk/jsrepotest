@@ -1,56 +1,56 @@
-FROM node:18
+# Use Ubuntu as base image
+FROM ubuntu:22.04
 
-# Install curl and other dependencies
-RUN apt-get update && apt-get install -y curl bash && rm -rf /var/lib/apt/lists/*
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Create app directory
-WORKDIR /app
+# Install Node.js, npm, and essential tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    vim \
+    nano \
+    htop \
+    net-tools \
+    iputils-ping \
+    build-essential \
+    python3 \
+    python3-pip \
+    sudo \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Initialize npm and install express and cors
-RUN npm init -y && npm install express cors
+# Create a non-root user with sudo access
+RUN useradd -m -s /bin/bash terminal && \
+    echo "terminal:terminal" | chpasswd && \
+    usermod -aG sudo terminal && \
+    echo "terminal ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Create the Express server inline
-RUN echo 'const express = require("express");' > server.js && \
-    echo 'const cors = require("cors");' >> server.js && \
-    echo '' >> server.js && \
-    echo 'const app = express();' >> server.js && \
-    echo 'const PORT = process.env.PORT || 3000;' >> server.js && \
-    echo '' >> server.js && \
-    echo 'app.use(cors());' >> server.js && \
-    echo 'app.use(express.json());' >> server.js && \
-    echo '' >> server.js && \
-    echo 'const generateFakeData = () => ({' >> server.js && \
-    echo '  id: Math.floor(Math.random() * 10000),' >> server.js && \
-    echo '  name: `User${Math.floor(Math.random() * 100)}`,' >> server.js && \
-    echo '  email: `user${Math.floor(Math.random() * 100)}@example.com`,' >> server.js && \
-    echo '  timestamp: new Date().toISOString(),' >> server.js && \
-    echo '  random: Math.random()' >> server.js && \
-    echo '});' >> server.js && \
-    echo '' >> server.js && \
-    echo 'app.get("/", (req, res) => {' >> server.js && \
-    echo '  res.json({' >> server.js && \
-    echo '    message: "Welcome to JSON Server",' >> server.js && \
-    echo '    data: generateFakeData()' >> server.js && \
-    echo '  });' >> server.js && \
-    echo '});' >> server.js && \
-    echo '' >> server.js && \
-    echo 'app.get("/health", (req, res) => {' >> server.js && \
-    echo '  res.json({' >> server.js && \
-    echo '    status: "healthy",' >> server.js && \
-    echo '    uptime: process.uptime(),' >> server.js && \
-    echo '    data: generateFakeData()' >> server.js && \
-    echo '  });' >> server.js && \
-    echo '});' >> server.js && \
-    echo '' >> server.js && \
-    echo 'app.listen(PORT, "0.0.0.0", () => {' >> server.js && \
-    echo '  console.log(`Server running on port ${PORT}`);' >> server.js && \
-    echo '});' >> server.js
+# Install wetty (web-based terminal)
+RUN npm install -g wetty
 
-# Download and setup sshx
-RUN curl -sSf https://sshx.io/get | sh
+# Set working directory
+WORKDIR /home/terminal
 
-# Expose port
-EXPOSE 3000
+# Expose port (Render uses PORT environment variable)
+ENV PORT=10000
 
-# Start script that runs sshx and node server
-CMD sshx & node server.js
+# Create startup script
+RUN echo '#!/bin/bash\n\
+echo "================================="\n\
+echo "Web Terminal Ready!"\n\
+echo "================================="\n\
+echo "Username: terminal"\n\
+echo "Password: terminal"\n\
+echo "================================="\n\
+wetty --host 0.0.0.0 --port $PORT --base / --title "Render Terminal"' > /start.sh && \
+    chmod +x /start.sh
+
+# Switch to non-root user
+USER terminal
+
+# Start the web terminal
+CMD ["/start.sh"]
