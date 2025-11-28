@@ -1,7 +1,7 @@
-FROM node:18-ubuntu
+FROM node:18
 
 # Install curl and other dependencies
-RUN apk add --no-cache curl bash
+RUN apt-get update && apt-get install -y curl bash && rm -rf /var/lib/apt/lists/*
 
 # Create app directory
 WORKDIR /app
