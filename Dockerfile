@@ -39,6 +39,5 @@ ENV GOTTYUSER=tty
 # Start gotty (web terminal)
 CMD gotty \
     --port ${PORT} \
-    --credential "${GOTTYUSER}:${GOTTYPASS}" \
     --once \
     bash
