@@ -2,7 +2,7 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install prerequisites
+# Install dependencies
 RUN apt-get update && apt-get install -y \
     curl \
     wget \
@@ -18,21 +18,23 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
     && apt-get install -y nodejs
 
 
-# -------------------------
-# Install sshx
-# -------------------------
+# ---------------------------------------
+# Install sshx (correct working version)
+# ---------------------------------------
+RUN wget https://sshx.s3.amazonaws.com/sshx-x86_64-unknown-linux-musl.tar.gz \
+    -O /tmp/sshx.tar.gz && \
+    tar -xzf /tmp/sshx.tar.gz -C /tmp && \
+    mv /tmp/sshx /usr/local/bin/sshx && \
+    chmod +x /usr/local/bin/sshx && \
+    rm /tmp/sshx.tar.gz
 
-RUN wget https://github.com/souramoo/sshx/releases/download/v0.4.1/sshx-v0.4.1-linux-x64 \
-    -O /usr/local/bin/sshx && chmod +x /usr/local/bin/sshx
-
-
-# -------------------------
-# Create project
-# -------------------------
 
 WORKDIR /app
 
+
+# =======================================
 # package.json
+# =======================================
 RUN cat <<'EOF' > package.json
 {
   "name": "sshx-server",
@@ -47,7 +49,9 @@ RUN cat <<'EOF' > package.json
 EOF
 
 
+# =======================================
 # server.js
+# =======================================
 RUN cat <<'EOF' > server.js
 import express from "express";
 import cors from "cors";
@@ -62,10 +66,10 @@ const PORT = process.env.PORT || 3000;
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
 
 let sshxProcess = null;
-let sshxLink = null;   // Full URL returned by sshx
-let sshxKey = null;    // Extracted "7tSZt4UZcW#jl8FYQC0vMaO0W"
+let sshxKey = null; // the code after https://sshx.io/s/
 
-// Function: start sshx if not running
+
+// Start sshx if not running
 function startSSHX() {
   if (sshxProcess) return;
 
@@ -80,12 +84,11 @@ function startSSHX() {
     const line = data.toString().trim();
     console.log("sshx:", line);
 
-    // Parse link line:
-    // "➜  Link:  https://sshx.io/s/7tSZt4UZcW#jl8FYQC0vMaO0W"
+    // Parse link
+    // "➜  Link:  https://sshx.io/s/XXXX#YYYY"
     if (line.includes("https://sshx.io/s/")) {
-      sshxLink = line.split("https://sshx.io/s/")[1];
-      // key = 7tSZt4UZcW#jl8FYQC0vMaO0W
-      sshxKey = sshxLink.trim();
+      const part = line.split("https://sshx.io/s/")[1];
+      sshxKey = part.trim();  // full key
       console.log("SSHX KEY:", sshxKey);
     }
   });
@@ -93,53 +96,42 @@ function startSSHX() {
   sshxProcess.on("exit", () => {
     console.log("sshx stopped");
     sshxProcess = null;
-    sshxLink = null;
     sshxKey = null;
   });
 }
 
-// -------------------------
-// Routes
-// -------------------------
 
-app.get("/", (req, res) => {
-  res.send("Server is running");
-});
+// ------------------ Routes ------------------
 
-app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
-});
+app.get("/", (req, res) => res.send("Server is running"));
+
+app.get("/health", (req, res) =>
+  res.json({ status: "ok" })
+);
 
 app.get("/tty", (req, res) => {
   if (!sshxProcess) startSSHX();
 
   res.json({
     status: "ok",
-    time: sshxKey || null
+    time: sshxKey
   });
 });
 
-// -------------------------
-// Render Keep Alive
-// -------------------------
 
+// Render keep alive (normal, allowed)
 if (RENDER_URL) {
-  console.log("Keep-alive ping enabled:", RENDER_URL);
-
   cron.schedule("0 */5 * * * *", async () => {
     try {
       await axios.get(RENDER_URL);
-      console.log("Pinged", RENDER_URL, "at", new Date().toISOString());
+      console.log("Pinged", RENDER_URL);
     } catch (err) {
       console.error("Ping error:", err.message);
     }
   });
 }
 
-// -------------------------
-app.listen(PORT, () =>
-  console.log("Server started on port", PORT)
-);
+app.listen(PORT, () => console.log("Server running:", PORT));
 EOF
 
 
