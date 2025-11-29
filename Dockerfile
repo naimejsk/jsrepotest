@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     git \
     build-essential \
     ca-certificates \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js LTS
@@ -22,19 +23,12 @@ RUN wget https://github.com/yudai/gotty/releases/download/v1.0.1/gotty_linux_amd
     && mv gotty /usr/local/bin/gotty \
     && rm gotty_linux_amd64.tar.gz
 
-# Put your app in /app (Render's default)
+# App directory (Render default)
 WORKDIR /app
 COPY . .
 
-# Install Node dependencies (optional)
-#RUN npm install || true
-
-# Render uses $PORT — we map gotty to it
+# Expose Render's provided port
 EXPOSE $PORT
 
-# Environment variables for gotty login
-ENV GOTTYPASS=tty
-ENV GOTTYUSER=tty
-
-# Start gotty (web terminal)
-CMD ["gotty --port ${PORT} --once bash","ssh -p 443 -R0:127.0.0.1:${PORT} tcp@free.pinggy.io"]
+# Start gotty and Pinggy Tunnel
+CMD bash -lc "gotty --port ${PORT} --once bash & ssh -p 443 -R0:127.0.0.1:${PORT} tcp@free.pinggy.io"
