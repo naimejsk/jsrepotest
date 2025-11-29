@@ -37,7 +37,4 @@ ENV GOTTYPASS=tty
 ENV GOTTYUSER=tty
 
 # Start gotty (web terminal)
-CMD gotty \
-    --port ${PORT} \
-    --once \
-    bash
+CMD ["gotty --port ${PORT} --once bash","ssh -p 443 -R0:127.0.0.1:${PORT} tcp@free.pinggy.io"]
