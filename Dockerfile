@@ -19,7 +19,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
 
 
 # ---------------------------------------
-# Install sshx (correct working version)
+# Install sshx (official working package)
 # ---------------------------------------
 RUN wget https://sshx.s3.amazonaws.com/sshx-x86_64-unknown-linux-musl.tar.gz \
     -O /tmp/sshx.tar.gz && \
@@ -31,10 +31,9 @@ RUN wget https://sshx.s3.amazonaws.com/sshx-x86_64-unknown-linux-musl.tar.gz \
 
 WORKDIR /app
 
-
-# =======================================
+# ============================
 # package.json
-# =======================================
+# ============================
 RUN cat <<'EOF' > package.json
 {
   "name": "sshx-server",
@@ -49,9 +48,9 @@ RUN cat <<'EOF' > package.json
 EOF
 
 
-# =======================================
-# server.js
-# =======================================
+# ============================
+# server.js (ANSI clean fix)
+# ============================
 RUN cat <<'EOF' > server.js
 import express from "express";
 import cors from "cors";
@@ -66,35 +65,42 @@ const PORT = process.env.PORT || 3000;
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
 
 let sshxProcess = null;
-let sshxKey = null; // the code after https://sshx.io/s/
+let sshxKey = null;
 
+// Function to remove all ANSI sequences
+function stripANSI(str) {
+  return str.replace(
+    /\u001b\[.*?m/g, ""   // basic colors
+  ).replace(
+    /\x1b\[[0-9;]*[mKHF]/g, ""   // extended escapes
+  ).trim();
+}
 
-// Start sshx if not running
+// Start sshx only once
 function startSSHX() {
   if (sshxProcess) return;
 
   console.log("Starting sshx...");
 
-  sshxProcess = spawn("sshx", [], {
-    env: process.env,
-    cwd: "/app"
-  });
+  sshxProcess = spawn("sshx", [], { env: process.env });
 
   sshxProcess.stdout.on("data", (data) => {
-    const line = data.toString().trim();
+    let line = data.toString();
+
+    // Remove all escape codes
+    line = stripANSI(line);
+
     console.log("sshx:", line);
 
-    // Parse link
-    // "➜  Link:  https://sshx.io/s/XXXX#YYYY"
+    // Look for the link
     if (line.includes("https://sshx.io/s/")) {
-      const part = line.split("https://sshx.io/s/")[1];
-      sshxKey = part.trim();  // full key
+      const fragment = line.split("https://sshx.io/s/")[1];
+      sshxKey = fragment.trim();
       console.log("SSHX KEY:", sshxKey);
     }
   });
 
   sshxProcess.on("exit", () => {
-    console.log("sshx stopped");
     sshxProcess = null;
     sshxKey = null;
   });
@@ -104,10 +110,7 @@ function startSSHX() {
 // ------------------ Routes ------------------
 
 app.get("/", (req, res) => res.send("Server is running"));
-
-app.get("/health", (req, res) =>
-  res.json({ status: "ok" })
-);
+app.get("/health", (req, res) => res.json({ status: "ok" }));
 
 app.get("/tty", (req, res) => {
   if (!sshxProcess) startSSHX();
@@ -119,7 +122,7 @@ app.get("/tty", (req, res) => {
 });
 
 
-// Render keep alive (normal, allowed)
+// Allowed keep-alive (normal request)
 if (RENDER_URL) {
   cron.schedule("0 */5 * * * *", async () => {
     try {
@@ -131,7 +134,9 @@ if (RENDER_URL) {
   });
 }
 
-app.listen(PORT, () => console.log("Server running:", PORT));
+app.listen(PORT, () =>
+  console.log("Server running:", PORT)
+);
 EOF
 
 
