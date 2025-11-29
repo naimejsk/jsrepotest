@@ -2,8 +2,11 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install dependencies
+# ------------------------
+# Install sudo and dependencies
+# ------------------------
 RUN apt-get update && apt-get install -y \
+    sudo \
     curl \
     wget \
     git \
@@ -13,14 +16,15 @@ RUN apt-get update && apt-get install -y \
     openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
+# ------------------------
 # Install Node.js LTS
+# ------------------------
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
     && apt-get install -y nodejs
 
-
-# ---------------------------------------
-# Install sshx (official working package)
-# ---------------------------------------
+# ------------------------
+# Install sshx (official working tarball)
+# ------------------------
 RUN wget https://sshx.s3.amazonaws.com/sshx-x86_64-unknown-linux-musl.tar.gz \
     -O /tmp/sshx.tar.gz && \
     tar -xzf /tmp/sshx.tar.gz -C /tmp && \
@@ -28,12 +32,14 @@ RUN wget https://sshx.s3.amazonaws.com/sshx-x86_64-unknown-linux-musl.tar.gz \
     chmod +x /usr/local/bin/sshx && \
     rm /tmp/sshx.tar.gz
 
-
+# ------------------------
+# Workdir
+# ------------------------
 WORKDIR /app
 
-# ============================
+# ------------------------
 # package.json
-# ============================
+# ------------------------
 RUN cat <<'EOF' > package.json
 {
   "name": "sshx-server",
@@ -47,10 +53,9 @@ RUN cat <<'EOF' > package.json
 }
 EOF
 
-
-# ============================
-# server.js (ANSI clean fix)
-# ============================
+# ------------------------
+# server.js
+# ------------------------
 RUN cat <<'EOF' > server.js
 import express from "express";
 import cors from "cors";
@@ -67,49 +72,41 @@ const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
 let sshxProcess = null;
 let sshxKey = null;
 
-// Function to remove all ANSI sequences
+// Function to remove ANSI escape codes
 function stripANSI(str) {
-  return str.replace(
-    /\u001b\[.*?m/g, ""   // basic colors
-  ).replace(
-    /\x1b\[[0-9;]*[mKHF]/g, ""   // extended escapes
-  ).trim();
+  return str.replace(/\u001b\[[0-9;]*m/g, "").trim();
 }
 
-// Start sshx only once
+// Start sshx if not running
 function startSSHX() {
   if (sshxProcess) return;
 
   console.log("Starting sshx...");
-
-  sshxProcess = spawn("sshx", [], { env: process.env });
+  sshxProcess = spawn("sshx", [], { env: process.env, cwd: "/app" });
 
   sshxProcess.stdout.on("data", (data) => {
-    let line = data.toString();
+    const line = stripANSI(data.toString());
 
-    // Remove all escape codes
-    line = stripANSI(line);
-
-    console.log("sshx:", line);
-
-    // Look for the link
-    if (line.includes("https://sshx.io/s/")) {
-      const fragment = line.split("https://sshx.io/s/")[1];
-      sshxKey = fragment.trim();
+    // Extract key after https://sshx.io/s/
+    const match = line.match(/https:\/\/sshx\.io\/s\/([^\s]+)/);
+    if (match) {
+      sshxKey = match[1];
       console.log("SSHX KEY:", sshxKey);
     }
   });
 
   sshxProcess.on("exit", () => {
+    console.log("sshx stopped");
     sshxProcess = null;
     sshxKey = null;
   });
 }
 
-
-// ------------------ Routes ------------------
-
+// ------------------------
+// Routes
+// ------------------------
 app.get("/", (req, res) => res.send("Server is running"));
+
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 
 app.get("/tty", (req, res) => {
@@ -117,12 +114,12 @@ app.get("/tty", (req, res) => {
 
   res.json({
     status: "ok",
-    time: sshxKey
+    time: sshxKey || null
   });
 });
 
-
-// Allowed keep-alive (normal request)
+// ------------------------
+// Render keep-alive (allowed)
 if (RENDER_URL) {
   cron.schedule("0 */5 * * * *", async () => {
     try {
@@ -134,14 +131,21 @@ if (RENDER_URL) {
   });
 }
 
-app.listen(PORT, () =>
-  console.log("Server running:", PORT)
-);
+// ------------------------
+app.listen(PORT, () => console.log("Server running on port", PORT));
 EOF
 
-
+# ------------------------
+# Install Node.js dependencies
+# ------------------------
 RUN npm install
 
+# ------------------------
+# Expose Render port
+# ------------------------
 EXPOSE $PORT
 
+# ------------------------
+# Start server
+# ------------------------
 CMD ["node", "server.js"]
