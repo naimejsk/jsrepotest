@@ -2,7 +2,7 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system basics
+# Install prerequisites
 RUN apt-get update && apt-get install -y \
     curl \
     wget \
@@ -18,9 +18,16 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
     && apt-get install -y nodejs
 
 
+# -------------------------
+# Install sshx
+# -------------------------
+
+RUN wget https://github.com/souramoo/sshx/releases/download/v0.4.1/sshx-v0.4.1-linux-x64 \
+    -O /usr/local/bin/sshx && chmod +x /usr/local/bin/sshx
+
 
 # -------------------------
-# Create NODE project files
+# Create project
 # -------------------------
 
 WORKDIR /app
@@ -28,15 +35,13 @@ WORKDIR /app
 # package.json
 RUN cat <<'EOF' > package.json
 {
-  "name": "terminal-server",
+  "name": "sshx-server",
   "type": "module",
   "dependencies": {
     "axios": "^1.6.7",
     "cors": "^2.8.5",
     "express": "^4.18.2",
-    "node-cron": "^3.0.2",
-    "node-pty": "^1.0.0",
-    "ws": "^8.15.0"
+    "node-cron": "^3.0.2"
   }
 }
 EOF
@@ -46,15 +51,9 @@ EOF
 RUN cat <<'EOF' > server.js
 import express from "express";
 import cors from "cors";
-import { WebSocketServer } from "ws";
-import { spawn } from "node-pty";
-import path from "path";
-import axios from "axios";
 import cron from "node-cron";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import axios from "axios";
+import { spawn } from "child_process";
 
 const app = express();
 app.use(cors());
@@ -62,7 +61,46 @@ app.use(cors());
 const PORT = process.env.PORT || 3000;
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
 
-// --- HTTP Routes ---
+let sshxProcess = null;
+let sshxLink = null;   // Full URL returned by sshx
+let sshxKey = null;    // Extracted "7tSZt4UZcW#jl8FYQC0vMaO0W"
+
+// Function: start sshx if not running
+function startSSHX() {
+  if (sshxProcess) return;
+
+  console.log("Starting sshx...");
+
+  sshxProcess = spawn("sshx", [], {
+    env: process.env,
+    cwd: "/app"
+  });
+
+  sshxProcess.stdout.on("data", (data) => {
+    const line = data.toString().trim();
+    console.log("sshx:", line);
+
+    // Parse link line:
+    // "➜  Link:  https://sshx.io/s/7tSZt4UZcW#jl8FYQC0vMaO0W"
+    if (line.includes("https://sshx.io/s/")) {
+      sshxLink = line.split("https://sshx.io/s/")[1];
+      // key = 7tSZt4UZcW#jl8FYQC0vMaO0W
+      sshxKey = sshxLink.trim();
+      console.log("SSHX KEY:", sshxKey);
+    }
+  });
+
+  sshxProcess.on("exit", () => {
+    console.log("sshx stopped");
+    sshxProcess = null;
+    sshxLink = null;
+    sshxKey = null;
+  });
+}
+
+// -------------------------
+// Routes
+// -------------------------
 
 app.get("/", (req, res) => {
   res.send("Server is running");
@@ -72,91 +110,41 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// Serve xterm client
-app.use("/tty", express.static(path.join(__dirname, "public")));
+app.get("/tty", (req, res) => {
+  if (!sshxProcess) startSSHX();
 
-const server = app.listen(PORT, () => {
-  console.log(`Server running on ${PORT}`);
-});
-
-// --- WebSocket Terminal ---
-
-const wss = new WebSocketServer({ server, path: "/ws" });
-
-wss.on("connection", (ws) => {
-  console.log("⚡ WebSocket terminal connected");
-
-  const shell = spawn("bash", [], {
-    name: "xterm-color",
-    cols: 80,
-    rows: 30,
-    cwd: process.env.HOME,
-    env: process.env,
+  res.json({
+    status: "ok",
+    time: sshxKey || null
   });
-
-  shell.on("data", (data) => ws.send(data));
-  ws.on("message", (msg) => shell.write(msg.toString()));
-  ws.on("close", () => shell.kill());
 });
 
-// --- Render Keep-Alive Cron job ---
+// -------------------------
+// Render Keep Alive
+// -------------------------
 
 if (RENDER_URL) {
-  console.log("Keep-alive enabled:", RENDER_URL);
+  console.log("Keep-alive ping enabled:", RENDER_URL);
 
-  const CronExpression = {
-    EVERY_5_MINUTES: "0 */5 * * * *",
-  };
-
-  cron.schedule(CronExpression.EVERY_5_MINUTES, async () => {
+  cron.schedule("0 */5 * * * *", async () => {
     try {
       await axios.get(RENDER_URL);
-      console.log(
-        `Pinged ${RENDER_URL} at ${new Date().toISOString()}`
-      );
-    } catch (error) {
-      console.error(`Ping error:`, error.message);
+      console.log("Pinged", RENDER_URL, "at", new Date().toISOString());
+    } catch (err) {
+      console.error("Ping error:", err.message);
     }
   });
 }
+
+// -------------------------
+app.listen(PORT, () =>
+  console.log("Server started on port", PORT)
+);
 EOF
 
 
-# public directory & index.html
-RUN mkdir -p public
-
-RUN cat <<'EOF' > public/index.html
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Web Terminal</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm/css/xterm.css">
-  <script src="https://cdn.jsdelivr.net/npm/xterm/lib/xterm.js"></script>
-</head>
-
-<body style="margin:0;background:black;">
-  <div id="terminal" style="width:100vw;height:100vh;"></div>
-
-  <script>
-    const term = new Terminal();
-    term.open(document.getElementById("terminal"));
-
-    const ws = new WebSocket(`wss://${window.location.hostname}/ws`);
-
-    ws.onmessage = (ev) => term.write(ev.data);
-    term.onData(data => ws.send(data));
-  </script>
-</body>
-</html>
-EOF
-
-
-
-# Install Node dependencies
 RUN npm install
 
-# Render will supply PORT env var
 EXPOSE $PORT
 
 CMD ["node", "server.js"]
